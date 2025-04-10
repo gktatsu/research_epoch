@@ -1,0 +1,20 @@
+name: epoch
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.9
+  - pytorch=1.12.1
+  - torchvision=0.13.1
+  - cudatoolkit=11.3
+  - numpy
+  - matplotlib
+  - scipy
+  - tqdm
+  - h5py
+  - pillow
+  - pip
+  - tensorboard
+  - scikit-learn
+  - opencv  # pip から conda に変更
