@@ -15,6 +15,6 @@ dependencies:
   - h5py
   - pillow
   - pip
-  - tensorboard
+  - tensorboard>=1.15
   - scikit-learn
   - opencv  # pip から conda に変更
