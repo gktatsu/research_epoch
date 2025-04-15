@@ -1,3 +1,8 @@
+# 実行中
+# MPI-INF-3DHPデータセット S7, S8
+# homander 
+
+
 """
 MPI-INF-3DHPデータセットの前処理スクリプト
 """
@@ -430,5 +435,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-    
