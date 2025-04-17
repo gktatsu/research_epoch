@@ -225,12 +225,12 @@ class MPIInf3DHPDataset(Dataset):
     """
     MPI-INF-3DHPデータセットのカスタムデータセットクラス
     """
-    def __init__(self, data_path=MPI_INF_3DHP_DIR, sequences=None, 
+    def __init__(self, data_path=MPI_INF_3DHP_DIR, subjects=None, 
                  split="train", image_size=(224, 224), augment=False):
         """
         Args:
             data_path: MPI-INF-3DHPデータセットのルートディレクトリ
-            sequences: 使用するシーケンス番号のリスト（Noneの場合はsplitによる）
+            subjects: 使用するサブジェクト番号のリスト（Noneの場合はsplitによる）
             split: データセット分割 ("train" または "test")
             image_size: 画像サイズ (width, height)
             augment: データ拡張を行うかどうか
@@ -240,13 +240,13 @@ class MPIInf3DHPDataset(Dataset):
         self.augment = augment
         
         # シーケンスが指定されていなければ、分割に基づいて設定
-        if sequences is None:
+        if subjects is None:
             if split == "train":
-                self.sequences = DATASET_CONFIG['mpi_inf_3dhp']['train_sequences']
+                self.subjects = DATASET_CONFIG['mpi_inf_3dhp']['train_subjects']
             else:
-                self.sequences = DATASET_CONFIG['mpi_inf_3dhp']['test_sequences']
+                self.subjects = DATASET_CONFIG['mpi_inf_3dhp']['test_subjects']
         else:
-            self.sequences = sequences
+            self.subjects = subjects
         
         # データセットの読み込み
         self.data = self._load_data()
@@ -262,7 +262,7 @@ class MPIInf3DHPDataset(Dataset):
         # ここでは簡易的な実装を示す
         data = []
         
-        for seq in self.sequences:
+        for seq in self.subjects:
             seq_path = os.path.join(self.data_path, f"S{seq}")
             
             # 各カメラの視点について
