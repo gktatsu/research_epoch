@@ -48,7 +48,7 @@ def get_human36m_loader(data_path, batch_size=32, subjects=None, actions=None,
     return dataloader
 
 
-def get_mpiinf3dhp_loader(data_path, batch_size=32, sequences=None, 
+def get_mpiinf3dhp_loader(data_path, batch_size=32, subjects=None, 
                          split="train", image_size=(224, 224), augment=False, 
                          num_workers=4, shuffle=True):
     """
@@ -57,7 +57,7 @@ def get_mpiinf3dhp_loader(data_path, batch_size=32, sequences=None,
     Args:
         data_path: MPI-INF-3DHPデータセットのルートディレクトリ
         batch_size: バッチサイズ
-        sequences: 使用するシーケンス番号のリスト
+        subjects: 使用するサブジェクト番号のリスト
         split: データセット分割 ("train" または "test")
         image_size: 画像サイズ (width, height)
         augment: データ拡張を行うかどうか
@@ -69,7 +69,7 @@ def get_mpiinf3dhp_loader(data_path, batch_size=32, sequences=None,
     """
     dataset = MPIInf3DHPDataset(
         data_path=data_path,
-        sequences=sequences,
+        subjects=subjects,
         split=split,
         image_size=image_size,
         augment=augment
