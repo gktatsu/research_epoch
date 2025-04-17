@@ -262,44 +262,50 @@ class MPIInf3DHPDataset(Dataset):
         # ここでは簡易的な実装を示す
         data = []
         
-        for seq in self.subjects:
-            seq_path = os.path.join(self.data_path, f"S{seq}")
+        for subject in self.subjects:
+            subject_path = os.path.join(self.data_path, f"S{subject}")
+            seqs = os.listdir(subject_path)
+            # シーケンスのリスト
+            sequences = [seq for seq in seqs if os.path.isdir(os.path.join(subject_path, seq))]
             
-            # 各カメラの視点について
-            for cam in range(1, 15):  # MPI-INF-3DHPデータセットには通常14台のカメラがある
-                # H5ファイルが存在する場合
-                ann_file = os.path.join(seq_path, f"annot_cam{cam}.h5")
-                if os.path.exists(ann_file):
-                    with h5py.File(ann_file, 'r') as f:
-                        # フレーム数
-                        n_frames = f['poses_2d'].shape[0]
-                        
-                        for i in range(0, n_frames, 5):  # サンプリングレートを下げる
-                            # 画像パス
-                            img_path = os.path.join(seq_path, f"images/img_cam{cam}_{i:06d}.jpg")
+            for seq in sequences:
+                seq_path = os.path.join(self.data_path, f"S{seq}")
+                
+                # 各カメラの視点について
+                for cam in range(1, 15):  # MPI-INF-3DHPデータセットには通常14台のカメラがある
+                    # H5ファイルが存在する場合
+                    ann_file = os.path.join(seq_path, f"annot_cam{cam}.h5")
+                    if os.path.exists(ann_file):
+                        with h5py.File(ann_file, 'r') as f:
+                            # フレーム数
+                            n_frames = f['poses_2d'].shape[0]
                             
-                            # 2Dポーズ [17, 2]
-                            pose_2d = f['poses_2d'][i]
-                            
-                            # 3Dポーズ [17, 3]
-                            pose_3d = f['poses_3d'][i]
-                            
-                            # カメラパラメータ（MPI-INF-3DHPではカメラパラメータも提供されている）
-                            cam_param = {
-                                'R': f['camera'][i, :9].reshape(3, 3),  # 回転行列
-                                't': f['camera'][i, 9:12],               # 平行移動ベクトル
-                                'K': f['camera'][i, 12:21].reshape(3, 3) # カメラ内部パラメータ
-                            }
-                            
-                            data.append({
-                                'img_path': img_path,
-                                'pose_2d': pose_2d,
-                                'pose_3d': pose_3d,
-                                'cam_param': cam_param,
-                                'sequence': seq,
-                                'camera': cam,
-                                'frame': i
-                            })
+                            for i in range(0, n_frames, 5):  # サンプリングレートを下げる
+                                # 画像パス
+                                img_path = os.path.join(seq_path, f"images/img_cam{cam}_{i:06d}.jpg")
+                                
+                                # 2Dポーズ [17, 2]
+                                pose_2d = f['poses_2d'][i]
+                                
+                                # 3Dポーズ [17, 3]
+                                pose_3d = f['poses_3d'][i]
+                                
+                                # カメラパラメータ（MPI-INF-3DHPではカメラパラメータも提供されている）
+                                cam_param = {
+                                    'R': f['camera'][i, :9].reshape(3, 3),  # 回転行列
+                                    't': f['camera'][i, 9:12],               # 平行移動ベクトル
+                                    'K': f['camera'][i, 12:21].reshape(3, 3) # カメラ内部パラメータ
+                                }
+                                
+                                data.append({
+                                    'img_path': img_path,
+                                    'pose_2d': pose_2d,
+                                    'pose_3d': pose_3d,
+                                    'cam_param': cam_param,
+                                    'sequence': seq,
+                                    'camera': cam,
+                                    'frame': i
+                                })
         
         return data
     
