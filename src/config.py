@@ -97,8 +97,8 @@ DATASET_CONFIG = {
         'image_size': (224, 224),
     },
     'mpi_inf_3dhp': {
-        'train_sequences': [1, 2, 3, 4, 5, 6, 7],
-        'test_sequences': [8],
+        'train_subjects': [1, 2, 3, 4, 5, 6, 7],
+        'test_subjects': [8],
         'image_size': (224, 224),
     }
 }
