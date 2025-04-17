@@ -411,6 +411,8 @@ def main():
     parser = argparse.ArgumentParser(description='EPOCHフレームワークの訓練')
     parser.add_argument('--dataset', type=str, choices=['human36m', 'mpiinf3dhp'], default='human36m',
                         help='使用するデータセット')
+    parser.add_argument('--data_path', type=str, default=None,
+                        help='使用するデータセットのパス')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='バッチサイズ')
     parser.add_argument('--epochs', type=int, default=30,
@@ -451,6 +453,7 @@ def main():
     print(f"データローダーを作成しています... ({args.dataset})")
     train_loader = get_dataloader(
         dataset_name=args.dataset,
+        data_path=args.data_path,
         split='train',
         batch_size=args.batch_size,
         num_workers=args.num_workers,
@@ -460,6 +463,7 @@ def main():
     
     val_loader = get_dataloader(
         dataset_name=args.dataset,
+        data_path=args.data_path,
         split='test',
         batch_size=args.batch_size,
         num_workers=args.num_workers,
