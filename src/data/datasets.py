@@ -261,16 +261,17 @@ class MPIInf3DHPDataset(Dataset):
         # 注意: 実際の実装ではデータセットの構造に合わせた読み込みが必要
         # ここでは簡易的な実装を示す
         data = []
-        
+        print("data_path:", self.data_path)
         for subject in self.subjects:
             subject_path = os.path.join(self.data_path, f"S{subject}")
             seqs = os.listdir(subject_path)
             # シーケンスのリスト
             sequences = [seq for seq in seqs if os.path.isdir(os.path.join(subject_path, seq))]
+            print("Subject:", subject_path,",Sequences:", sequences)
             
             for seq in sequences:
-                seq_path = os.path.join(self.data_path, f"S{seq}")
-                
+                seq_path = os.path.join(subject_path, f"Seq{seq}")
+                print("Sequence:", seq)
                 # 各カメラの視点について
                 for cam in range(1, 15):  # MPI-INF-3DHPデータセットには通常14台のカメラがある
                     # H5ファイルが存在する場合
@@ -306,7 +307,7 @@ class MPIInf3DHPDataset(Dataset):
                                     'camera': cam,
                                     'frame': i
                                 })
-        
+        print("Loaded data:", len(data), "samples")
         return data
     
     def __len__(self):
