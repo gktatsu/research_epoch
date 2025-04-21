@@ -72,7 +72,7 @@ TRAIN_CONFIG = {
         'batch_size': 128,
         'lr': 5e-4,
         'weight_decay': 1e-5,
-        'epochs': 30,
+        'epochs': 2,
         'optimizer': 'adamw',
     },
     
