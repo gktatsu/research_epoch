@@ -67,6 +67,15 @@ TRAIN_CONFIG = {
         'optimizer': 'adamw',
     },
     
+    # EPOCH統合モデル訓練設定
+    'epoch': {
+        'batch_size': 128,
+        'lr': 5e-4,
+        'weight_decay': 1e-5,
+        'epochs': 30,
+        'optimizer': 'adamw',
+    },
+    
     # 損失関数の重み
     'loss_weights': {
         'lift_net': {
@@ -82,6 +91,15 @@ TRAIN_CONFIG = {
             'nf': 1.0,          # Normalizing Flow損失
             'bone': 1.0,        # 骨長比率損失
             'limbs': 0.1,       # 関節曲げ制約損失
+        },
+        'epoch': {
+            'rle': 10.0,        # 残差対数尤度推定損失（RegNetから）
+            'bone': 5.0,        # 骨長比率損失（両方のモデルで使用）
+            'limbs': 0.1,       # 関節曲げ制約損失（両方のモデルで使用）
+            'nf': 1.0,          # Normalizing Flow損失（両方のモデルで使用）
+            'l2d': 10.0,        # 2Dサイクル一貫性損失（LiftNetから）
+            'l3d': 1.0,         # 3Dサイクル一貫性損失（LiftNetから）
+            'def': 1.0,         # 変形損失（LiftNetから）
         }
     }
 }
@@ -97,8 +115,8 @@ DATASET_CONFIG = {
         'image_size': (224, 224),
     },
     'mpi_inf_3dhp': {
-        'train_subjects': [1],
-        'test_subjects': [2, 3, 4, 5, 6, 7, 8],
+        'train_sequences': [1],
+        'test_sequences': [2, 3, 4, 5, 6, 7, 8],
         'image_size': (224, 224),
     }
 }

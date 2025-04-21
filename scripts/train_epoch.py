@@ -3,6 +3,13 @@ EPOCHフレームワーク統合訓練スクリプト
 
 RegNetとLiftNetを組み合わせたエンドツーエンドのモデルを訓練
 """
+
+"""実行例：
+ssh aryabhata
+conda activate epoch
+cd scripts
+python train_epoch.py --dataset mpiinf3dhp --data_path /home2/t-hori/2025/develop/epoch/data/MPI-INF-3DHP/mpi_inf_3dhp_training_set_h5
+"""
 import os
 import sys
 import argparse
@@ -32,7 +39,7 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
     
     Args:
         model: 訓練するモデル
-        normalizing_flow: Normalizing Flowモデル（Noneの場合もある）
+        normalizing_flow: 学習済みのNormalizing Flow
         train_loader: 訓練データローダー
         optimizer: オプティマイザ
         criterion: 損失関数の辞書
@@ -48,25 +55,21 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
     # 損失の合計
     total_losses = {
         'total': 0,
-        'lift_2d': 0,
-        'lift_3d': 0,
-        'lift_bone': 0,
-        'lift_limbs': 0,
-        'reg_bone': 0,
-        'reg_limbs': 0,
         'rle': 0,
+        'bone': 0,
+        'limbs': 0,
         'nf': 0,
+        'l2d': 0,
+        'l3d': 0,
+        'def': 0
     }
     
     # 評価指標の合計
     total_metrics = {
         'mpjpe_2d': 0,
-        'mpjpe_3d_reg': 0,
-        'mpjpe_3d_lift': 0,
-        'pa_mpjpe_3d_reg': 0,
-        'pa_mpjpe_3d_lift': 0,
-        'n_mpjpe_3d_reg': 0,
-        'n_mpjpe_3d_lift': 0,
+        'mpjpe_3d': 0,
+        'pa_mpjpe_3d': 0,
+        'n_mpjpe_3d': 0
     }
     
     # バッチ数
@@ -79,9 +82,6 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
             image = batch['image'].to(device)
             pose_2d_gt = batch['pose_2d'].to(device)
             pose_3d_gt = batch['pose_3d'].to(device)
-            cam_K_gt = batch['cam_K'].to(device)
-            cam_R_gt = batch['cam_R'].to(device)
-            cam_t_gt = batch['cam_t'].to(device)
             
             # 入力画像のバウンディングボックスは、常に画像全体を使用
             batch_size = image.shape[0]
@@ -94,89 +94,64 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
             # 順伝播
             outputs = model(image, bbox)
             
-            # RegNetの出力を取得
-            pose_2d_reg = outputs['regnet_outputs']['pose_2d']         # 推定された2Dポーズ
-            pose_3d_reg = outputs['regnet_outputs']['pose_3d']         # 推定された3Dポーズ
-            joint_presence = outputs['regnet_outputs']['joint_presence'] # 関節存在確率
-            cam_K = outputs['regnet_outputs']['cam_K']                 # カメラ内部パラメータ
-            cam_R = outputs['regnet_outputs']['cam_R']                 # カメラ回転行列
-            cam_t = outputs['regnet_outputs']['cam_t']                 # カメラ平行移動ベクトル
+            # RegNetの出力
+            regnet_outputs = outputs['regnet_outputs']
+            pose_2d_pred = regnet_outputs['pose_2d']
+            pose_3d_reg = regnet_outputs['pose_3d']
+            joint_presence = regnet_outputs['joint_presence']
             
-            # LiftNetの出力を取得
-            pose_3d_lift = outputs['liftnet_outputs']['pose_3d']       # 推定された3Dポーズ
-            pose_2d_rec = outputs['liftnet_outputs']['pose_2d_rec']    # 再投影された2Dポーズ
-            pose_3d_rec = outputs['liftnet_outputs']['pose_3d_rec']    # 再構築された3Dポーズ
+            # LiftNetの出力
+            liftnet_outputs = outputs['liftnet_outputs']
+            pose_3d_lift = liftnet_outputs['pose_3d']
+            pose_2d_rec = liftnet_outputs['pose_2d_rec']
+            pose_3d_rec = liftnet_outputs['pose_3d_rec']
             
-            # LiftNetのサイクル一貫性による2D/3D損失
-            try:
-                loss_lift_2d = criterion['l2d'](pose_2d_rec, pose_2d_reg)
-            except Exception as e:
-                print(f"L2D損失計算中にエラーが発生しました: {e}")
-                loss_lift_2d = torch.tensor(0.1, device=device)
+            # 回転されたポーズと2D投影
+            if 'pose_2d_rotated' in regnet_outputs:
+                rotated_pose_2d_reg = regnet_outputs['pose_2d_rotated']
+            else:
+                rotated_pose_2d_reg = None
                 
-            try:
-                loss_lift_3d = criterion['l3d'](pose_3d_rec, pose_3d_lift)
-            except Exception as e:
-                print(f"L3D損失計算中にエラーが発生しました: {e}")
-                loss_lift_3d = torch.tensor(0.1, device=device)
+            rotated_pose_2d_lift = liftnet_outputs['pose_2d_rotated']
             
-            # 解剖学的制約損失
-            try:
-                loss_lift_bone = criterion['bone'](pose_3d_lift)
-            except Exception as e:
-                print(f"LiftNet骨長損失計算中にエラーが発生しました: {e}")
-                loss_lift_bone = torch.tensor(0.1, device=device)
-                
-            try:
-                loss_lift_limbs = criterion['limbs'](pose_3d_lift)
-            except Exception as e:
-                print(f"LiftNet関節角度損失計算中にエラーが発生しました: {e}")
-                loss_lift_limbs = torch.tensor(0.1, device=device)
-                
-            try:
-                loss_reg_bone = criterion['bone'](pose_3d_reg)
-            except Exception as e:
-                print(f"RegNet骨長損失計算中にエラーが発生しました: {e}")
-                loss_reg_bone = torch.tensor(0.1, device=device)
-                
-            try:
-                loss_reg_limbs = criterion['limbs'](pose_3d_reg)
-            except Exception as e:
-                print(f"RegNet関節角度損失計算中にエラーが発生しました: {e}")
-                loss_reg_limbs = torch.tensor(0.1, device=device)
+            # 関節存在確率をシグモイド関数で0~1に変換
+            joint_presence = torch.sigmoid(joint_presence)
             
-            # RLE損失（2Dポーズ推定）
-            try:
-                # 関節存在確率をシグモイド関数で0~1に変換
-                joint_confidence = torch.sigmoid(joint_presence)
-                loss_rle = criterion['rle'](pose_2d_reg, pose_2d_gt, joint_confidence)
-            except Exception as e:
-                print(f"RLE損失計算中にエラーが発生しました: {e}")
-                loss_rle = torch.tensor(0.1, device=device)
+            # RegNet損失を計算
+            loss_reg_rle = criterion['rle'](pose_2d_pred, pose_2d_gt, joint_presence)
+            loss_reg_bone = criterion['bone'](pose_3d_reg)
+            loss_reg_limbs = criterion['limbs'](pose_3d_reg)
             
-            # Normalizing Flow損失
-            loss_nf = torch.tensor(0.0, device=device)
-            if normalizing_flow is not None and 'nf' in criterion and criterion['nf'] is not None:
-                # 回転されたポーズが存在する場合
-                if 'pose_2d_rotated' in outputs['liftnet_outputs']:
-                    rotated_pose_2d = outputs['liftnet_outputs']['pose_2d_rotated']
-                    try:
-                        loss_nf = criterion['nf'](rotated_pose_2d)
-                    except Exception as e:
-                        print(f"NF損失計算中にエラーが発生しました: {e}")
-                        loss_nf = torch.tensor(0.1, device=device)
+            # RegNet Normalizing Flow損失（回転されたポーズがある場合）
+            loss_reg_nf = torch.tensor(0.0, device=device)
+            if rotated_pose_2d_reg is not None and criterion['nf'] is not None:
+                loss_reg_nf = criterion['nf'](rotated_pose_2d_reg)
+            
+            # LiftNet損失を計算
+            loss_lift_l2d = criterion['l2d'](pose_2d_rec, pose_2d_gt)
+            loss_lift_l3d = criterion['l3d'](pose_3d_rec, pose_3d_lift)
+            loss_lift_bone = criterion['bone'](pose_3d_lift)
+            loss_lift_limbs = criterion['limbs'](pose_3d_lift)
+            loss_lift_def = criterion['def'](pose_3d_lift, pose_3d_rec)
+            
+            # LiftNet Normalizing Flow損失
+            loss_lift_nf = torch.tensor(0.0, device=device)
+            if criterion['nf'] is not None:
+                loss_lift_nf = criterion['nf'](rotated_pose_2d_lift)
             
             # 重み付き損失の合計
             loss = (
-                loss_weights['l2d'] * loss_lift_2d +
-                loss_weights['l3d'] * loss_lift_3d +
+                loss_weights['rle'] * loss_reg_rle +
                 loss_weights['bone'] * (loss_lift_bone + loss_reg_bone) +
                 loss_weights['limbs'] * (loss_lift_limbs + loss_reg_limbs) +
-                loss_weights['rle'] * loss_rle
+                loss_weights['l2d'] * loss_lift_l2d +
+                loss_weights['l3d'] * loss_lift_l3d +
+                loss_weights['def'] * loss_lift_def
             )
             
-            if normalizing_flow is not None and 'nf' in loss_weights:
-                loss += loss_weights['nf'] * loss_nf
+            # Normalizing Flow損失（利用可能な場合）
+            if criterion['nf'] is not None:
+                loss += loss_weights['nf'] * (loss_lift_nf + loss_reg_nf)
             
             # 逆伝播
             loss.backward()
@@ -186,71 +161,37 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
             
             # 損失を累積
             total_losses['total'] += loss.item()
-            total_losses['lift_2d'] += loss_lift_2d.item()
-            total_losses['lift_3d'] += loss_lift_3d.item()
-            total_losses['lift_bone'] += loss_lift_bone.item()
-            total_losses['lift_limbs'] += loss_lift_limbs.item()
-            total_losses['reg_bone'] += loss_reg_bone.item()
-            total_losses['reg_limbs'] += loss_reg_limbs.item()
-            total_losses['rle'] += loss_rle.item()
-            if normalizing_flow is not None:
-                total_losses['nf'] += loss_nf.item()
+            total_losses['rle'] += loss_reg_rle.item()
+            total_losses['bone'] += (loss_lift_bone.item() + loss_reg_bone.item()) / 2
+            total_losses['limbs'] += (loss_lift_limbs.item() + loss_reg_limbs.item()) / 2
+            total_losses['l2d'] += loss_lift_l2d.item()
+            total_losses['l3d'] += loss_lift_l3d.item()
+            total_losses['def'] += loss_lift_def.item()
+            
+            if criterion['nf'] is not None:
+                total_losses['nf'] += (loss_lift_nf.item() + loss_reg_nf.item()) / 2
             
             # 評価指標を計算
             # 2Dポーズの平均関節位置誤差（ピクセル単位）
-            mpjpe_2d = torch.mean(torch.sqrt(torch.sum((pose_2d_reg - pose_2d_gt) ** 2, dim=-1)))
+            mpjpe_2d = torch.mean(torch.sqrt(torch.sum((pose_2d_pred - pose_2d_gt) ** 2, dim=-1)))
             
             # 3Dポーズの平均関節位置誤差（mm単位）
             # CPUに転送して計算（NumPy関数を使用するため）
-            pose_3d_reg_np = pose_3d_reg.detach().cpu().numpy()
-            pose_3d_lift_np = pose_3d_lift.detach().cpu().numpy()
+            pose_3d_pred_np = pose_3d_lift.detach().cpu().numpy()
             pose_3d_gt_np = pose_3d_gt.detach().cpu().numpy()
             
-            # MPJPE
-            mpjpe_3d_reg = calculate_mpjpe(pose_3d_reg_np, pose_3d_gt_np)
-            mpjpe_3d_lift = calculate_mpjpe(pose_3d_lift_np, pose_3d_gt_np)
-            
-            # PA-MPJPE (Procrustes Analysis MPJPE)
-            try:
-                pa_mpjpe_3d_reg = calculate_pa_mpjpe(pose_3d_reg_np, pose_3d_gt_np)
-            except Exception as e:
-                print(f"PA-MPJPE計算中にエラーが発生しました(RegNet): {e}")
-                pa_mpjpe_3d_reg = 0.0
-                
-            try:
-                pa_mpjpe_3d_lift = calculate_pa_mpjpe(pose_3d_lift_np, pose_3d_gt_np)
-            except Exception as e:
-                print(f"PA-MPJPE計算中にエラーが発生しました(LiftNet): {e}")
-                pa_mpjpe_3d_lift = 0.0
-            
-            # N-MPJPE (Normalized MPJPE)
-            try:
-                n_mpjpe_3d_reg = calculate_n_mpjpe(pose_3d_reg_np, pose_3d_gt_np)
-            except Exception as e:
-                print(f"N-MPJPE計算中にエラーが発生しました(RegNet): {e}")
-                n_mpjpe_3d_reg = 0.0
-                
-            try:
-                n_mpjpe_3d_lift = calculate_n_mpjpe(pose_3d_lift_np, pose_3d_gt_np)
-            except Exception as e:
-                print(f"N-MPJPE計算中にエラーが発生しました(LiftNet): {e}")
-                n_mpjpe_3d_lift = 0.0
+            mpjpe_3d = calculate_mpjpe(pose_3d_pred_np, pose_3d_gt_np)
+            pa_mpjpe_3d = calculate_pa_mpjpe(pose_3d_pred_np, pose_3d_gt_np)
+            n_mpjpe_3d = calculate_n_mpjpe(pose_3d_pred_np, pose_3d_gt_np)
             
             # 評価指標を累積
             total_metrics['mpjpe_2d'] += mpjpe_2d.item()
-            total_metrics['mpjpe_3d_reg'] += mpjpe_3d_reg
-            total_metrics['mpjpe_3d_lift'] += mpjpe_3d_lift
-            total_metrics['pa_mpjpe_3d_reg'] += pa_mpjpe_3d_reg
-            total_metrics['pa_mpjpe_3d_lift'] += pa_mpjpe_3d_lift
-            total_metrics['n_mpjpe_3d_reg'] += n_mpjpe_3d_reg
-            total_metrics['n_mpjpe_3d_lift'] += n_mpjpe_3d_lift
+            total_metrics['mpjpe_3d'] += mpjpe_3d
+            total_metrics['pa_mpjpe_3d'] += pa_mpjpe_3d
+            total_metrics['n_mpjpe_3d'] += n_mpjpe_3d
             
-            # 進捗バーに現在の損失と評価指標を表示
-            t.set_postfix(
-                loss=loss.item(),
-                mpjpe_2d=mpjpe_2d.item(),
-                pa_mpjpe_lift=pa_mpjpe_3d_lift
-            )
+            # 進捗バーに現在の損失を表示
+            t.set_postfix(loss=loss.item())
     
     # 各損失と評価指標の平均を計算
     for key in total_losses:
@@ -567,30 +508,24 @@ def main():
         'nf': NFLoss(normalizing_flow).to(device) if normalizing_flow is not None else None
     }
     
-    # 損失関数の重み（TRAIN_CONFIGから取得するか、デフォルト値を使用）
-    # RegNetとLiftNetの損失の重みを組み合わせる
-    reg_weights = TRAIN_CONFIG['loss_weights']['reg_net']
-    lift_weights = TRAIN_CONFIG['loss_weights']['lift_net']
-    
-    loss_weights = {
-        'rle': reg_weights['rle'],                  # RegNetの残差対数尤度推定損失
-        'l2d': lift_weights['l2d'],                # LiftNetの2Dサイクル一貫性損失
-        'l3d': lift_weights['l3d'],                # LiftNetの3Dサイクル一貫性損失
-        'bone_reg': reg_weights['bone'],           # RegNetの骨長比率損失
-        'bone_lift': lift_weights['bone'],         # LiftNetの骨長比率損失
-        'limbs_reg': reg_weights['limbs'],         # RegNetの関節曲げ制約損失
-        'limbs_lift': lift_weights['limbs'],       # LiftNetの関節曲げ制約損失
-        'def': lift_weights['def'],                # LiftNetの変形損失
-        'nf_reg': reg_weights['nf'],               # RegNetのNormalizing Flow損失
-        'nf_lift': lift_weights['nf']              # LiftNetのNormalizing Flow損失
-    }
+    # 損失関数の重み - EPOCHモデル用の設定を使用
+    loss_weights = TRAIN_CONFIG['loss_weights']['epoch']
     
     # オプティマイザ
-    optimizer = optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.lr,
-        weight_decay=args.weight_decay
-    )
+    if TRAIN_CONFIG['epoch']['optimizer'].lower() == 'adam':
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    elif TRAIN_CONFIG['epoch']['optimizer'].lower() == 'adamw':
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    else:
+        raise ValueError(f"未知のオプティマイザ: {TRAIN_CONFIG['epoch']['optimizer']}")
     
     # 学習率スケジューラ
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -609,7 +544,6 @@ def main():
     # 開始エポックと最良の損失を初期化
     start_epoch = 0
     best_val_loss = float('inf')
-    best_pa_mpjpe = float('inf')
     
     # 訓練を再開する場合
     if args.resume is not None:
@@ -620,7 +554,6 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_val_loss = checkpoint['best_val_loss']
-            best_pa_mpjpe = checkpoint.get('best_pa_mpjpe', float('inf'))
             print(f"エポック {start_epoch} から訓練を再開します")
         else:
             print(f"チェックポイントが見つかりません: {args.resume}")
@@ -647,72 +580,51 @@ def main():
         scheduler.step(val_losses['total'])
         
         # 損失をTensorBoardに記録
-        for key, value in train_losses.items():
-            writer.add_scalar(f'Loss/train/{key}', value, epoch)
-            
-        for key, value in val_losses.items():
-            writer.add_scalar(f'Loss/val/{key}', value, epoch)
+        for loss_name, loss_value in train_losses.items():
+            writer.add_scalar(f'Loss/train/{loss_name}', loss_value, epoch)
+        
+        for loss_name, loss_value in val_losses.items():
+            writer.add_scalar(f'Loss/val/{loss_name}', loss_value, epoch)
         
         # 評価指標をTensorBoardに記録
-        for key, value in train_metrics.items():
-            writer.add_scalar(f'Metrics/train/{key}', value, epoch)
-            
-        for key, value in val_metrics.items():
-            writer.add_scalar(f'Metrics/val/{key}', value, epoch)
+        for metric_name, metric_value in train_metrics.items():
+            writer.add_scalar(f'Metrics/train/{metric_name}', metric_value, epoch)
+        
+        for metric_name, metric_value in val_metrics.items():
+            writer.add_scalar(f'Metrics/val/{metric_name}', metric_value, epoch)
         
         # 学習率をTensorBoardに記録
         writer.add_scalar('LearningRate', optimizer.param_groups[0]['lr'], epoch)
         
         # 結果を表示
         print(f"訓練損失: {train_losses['total']:.4f}, 検証損失: {val_losses['total']:.4f}, 時間: {epoch_time:.2f}秒")
-        print(f"訓練 MPJPE 3D (RegNet): {train_metrics['mpjpe_3d_reg']:.2f} mm, PA-MPJPE 3D: {train_metrics['pa_mpjpe_3d_reg']:.2f} mm")
-        print(f"訓練 MPJPE 3D (LiftNet): {train_metrics['mpjpe_3d_lift']:.2f} mm, PA-MPJPE 3D: {train_metrics['pa_mpjpe_3d_lift']:.2f} mm")
-        print(f"検証 MPJPE 3D (RegNet): {val_metrics['mpjpe_3d_reg']:.2f} mm, PA-MPJPE 3D: {val_metrics['pa_mpjpe_3d_reg']:.2f} mm")
-        print(f"検証 MPJPE 3D (LiftNet): {val_metrics['mpjpe_3d_lift']:.2f} mm, PA-MPJPE 3D: {val_metrics['pa_mpjpe_3d_lift']:.2f} mm")
+        print(f"訓練 MPJPE 3D: {train_metrics['mpjpe_3d']:.2f} mm, PA-MPJPE 3D: {train_metrics['pa_mpjpe_3d']:.2f} mm")
+        print(f"検証 MPJPE 3D: {val_metrics['mpjpe_3d']:.2f} mm, PA-MPJPE 3D: {val_metrics['pa_mpjpe_3d']:.2f} mm")
         
-        # 最良のモデルを保存（損失ベース）
+        # 最良のモデルを保存
         if val_losses['total'] < best_val_loss:
             best_val_loss = val_losses['total']
-            best_model_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_best_loss.pth")
+            best_model_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_best.pth")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_loss': best_val_loss,
-                'best_pa_mpjpe': best_pa_mpjpe,
                 'train_losses': train_losses,
                 'val_losses': val_losses,
                 'train_metrics': train_metrics,
                 'val_metrics': val_metrics
             }, best_model_path)
-            print(f"最良の損失モデルを保存しました: {best_model_path}")
-        
-        # 最良のモデルを保存（PA-MPJPE指標ベース）
-        if val_metrics['pa_mpjpe_3d_lift'] < best_pa_mpjpe:
-            best_pa_mpjpe = val_metrics['pa_mpjpe_3d_lift']
-            best_model_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_best_pa_mpjpe.pth")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'best_val_loss': best_val_loss,
-                'best_pa_mpjpe': best_pa_mpjpe,
-                'train_losses': train_losses,
-                'val_losses': val_losses,
-                'train_metrics': train_metrics,
-                'val_metrics': val_metrics
-            }, best_model_path)
-            print(f"最良のPA-MPJPEモデルを保存しました: {best_model_path}")
+            print(f"最良のモデルを保存しました: {best_model_path}")
         
         # 定期的にチェックポイントを保存
-        if (epoch + 1) % 5 == 0:
-            checkpoint_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_checkpoint_{epoch+1}.pth")
+        if (epoch + 1) % 5 == 0 or epoch == args.epochs - 1:
+            checkpoint_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_epoch_{epoch+1}.pth")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_loss': best_val_loss,
-                'best_pa_mpjpe': best_pa_mpjpe,
                 'train_losses': train_losses,
                 'val_losses': val_losses,
                 'train_metrics': train_metrics,
@@ -726,8 +638,7 @@ def main():
         'epoch': args.epochs - 1,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'best_val_loss': best_val_loss,
-        'best_pa_mpjpe': best_pa_mpjpe
+        'best_val_loss': best_val_loss
     }, final_model_path)
     print(f"最終モデルを保存しました: {final_model_path}")
     
