@@ -225,12 +225,13 @@ class MPIInf3DHPDataset(Dataset):
     """
     MPI-INF-3DHPデータセットのカスタムデータセットクラス
     """
-    def __init__(self, data_path=MPI_INF_3DHP_DIR, subjects=None, 
+    def __init__(self, data_path=MPI_INF_3DHP_DIR, subjects=None, sequences=None, 
                  split="train", image_size=(224, 224), augment=False):
         """
         Args:
             data_path: MPI-INF-3DHPデータセットのルートディレクトリ
             subjects: 使用するサブジェクト番号のリスト（Noneの場合はsplitによる）
+            sequences: 使用するシーケンス番号のリスト（Noneの場合は全て）
             split: データセット分割 ("train" または "test")
             image_size: 画像サイズ (width, height)
             augment: データ拡張を行うかどうか
@@ -239,75 +240,157 @@ class MPIInf3DHPDataset(Dataset):
         self.image_size = image_size
         self.augment = augment
         
-        # シーケンスが指定されていなければ、分割に基づいて設定
+        # サブジェクトが指定されていなければ、分割に基づいて設定
         if subjects is None:
             if split == "train":
-                self.subjects = DATASET_CONFIG['mpi_inf_3dhp']['train_subjects']
+                self.subjects = [1, 2, 3, 4, 5, 6, 7]  # S1-S7は訓練用
             else:
-                self.subjects = DATASET_CONFIG['mpi_inf_3dhp']['test_subjects']
+                self.subjects = [8]  # S8はテスト用
         else:
             self.subjects = subjects
         
+        # シーケンスが指定されていなければ、すべてのシーケンスを使用
+        if sequences is None:
+            self.sequences = [1, 2]  # Seq1, Seq2
+        else:
+            self.sequences = sequences
+        
+        print(f"データセットの初期化: {data_path}")
+        print(f"サブジェクト: {self.subjects}")
+        print(f"シーケンス: {self.sequences}")
+        
         # データセットの読み込み
         self.data = self._load_data()
+        print(f"読み込まれたデータ数: {len(self.data)}")
     
     def _load_data(self):
         """
-        H5ファイルからデータを読み込み
+        アノテーションファイルからデータを読み込み
         
         Returns:
             data: 画像パス、2Dポーズ、3Dポーズのリスト
         """
-        # 注意: 実際の実装ではデータセットの構造に合わせた読み込みが必要
-        # ここでは簡易的な実装を示す
         data = []
-        print("data_path:", self.data_path)
+        
         for subject in self.subjects:
-            subject_path = os.path.join(self.data_path, f"S{subject}")
-            seqs = os.listdir(subject_path)
-            # シーケンスのリスト
-            sequences = [seq for seq in seqs if os.path.isdir(os.path.join(subject_path, seq))]
-            print("Subject:", subject_path,",Sequences:", sequences)
-            
-            for seq in sequences:
-                seq_path = os.path.join(subject_path, f"Seq{seq}")
-                print("Sequence:", seq)
-                # 各カメラの視点について
-                for cam in range(1, 15):  # MPI-INF-3DHPデータセットには通常14台のカメラがある
-                    # H5ファイルが存在する場合
-                    ann_file = os.path.join(seq_path, f"annot_cam{cam}.h5")
-                    if os.path.exists(ann_file):
-                        with h5py.File(ann_file, 'r') as f:
-                            # フレーム数
-                            n_frames = f['poses_2d'].shape[0]
+            for seq in self.sequences:
+                subject_seq_path = os.path.join(self.data_path, f"S{subject}", f"Seq{seq}")
+                
+                # ディレクトリが存在しない場合はスキップ
+                if not os.path.exists(subject_seq_path):
+                    print(f"ディレクトリが見つかりません: {subject_seq_path}")
+                    continue
+                
+                # すべてのカメラについて処理
+                for cam in range(14):  # cam0 to cam13
+                    cam_path = os.path.join(subject_seq_path, f"cam{cam}")
+                    
+                    # カメラディレクトリが存在しない場合はスキップ
+                    if not os.path.exists(cam_path):
+                        continue
+                    
+                    annot_file = os.path.join(cam_path, f"annot_cam{cam}.h5")
+                    
+                    if not os.path.exists(annot_file):
+                        print(f"アノテーションファイルが見つかりません: {annot_file}")
+                        continue
+                    
+                    print(f"アノテーションファイルを読み込み中: {annot_file}")
+                    
+                    try:
+                        with h5py.File(annot_file, 'r') as f:
+                            # データセットの構造を確認
+                            print(f"H5ファイルのキー: {list(f.keys())}")
                             
-                            for i in range(0, n_frames, 5):  # サンプリングレートを下げる
-                                # 画像パス
-                                img_path = os.path.join(seq_path, f"images/img_cam{cam}_{i:06d}.jpg")
+                            # 存在するデータセットに基づいて処理を行う
+                            if 'poses_2d' in f:
+                                pose_2d_data = f['poses_2d']
+                                n_frames = pose_2d_data.shape[0]
+                                print(f"フレーム数: {n_frames}")
                                 
-                                # 2Dポーズ [17, 2]
-                                pose_2d = f['poses_2d'][i]
-                                
-                                # 3Dポーズ [17, 3]
-                                pose_3d = f['poses_3d'][i]
-                                
-                                # カメラパラメータ（MPI-INF-3DHPではカメラパラメータも提供されている）
-                                cam_param = {
-                                    'R': f['camera'][i, :9].reshape(3, 3),  # 回転行列
-                                    't': f['camera'][i, 9:12],               # 平行移動ベクトル
-                                    'K': f['camera'][i, 12:21].reshape(3, 3) # カメラ内部パラメータ
-                                }
-                                
-                                data.append({
-                                    'img_path': img_path,
-                                    'pose_2d': pose_2d,
-                                    'pose_3d': pose_3d,
-                                    'cam_param': cam_param,
-                                    'sequence': seq,
-                                    'camera': cam,
-                                    'frame': i
-                                })
-        print("Loaded data:", len(data), "samples")
+                                # サンプリングレートを下げる（すべてのフレームを使用するとデータが多すぎる）
+                                for i in range(0, n_frames, 5):
+                                    if i >= n_frames:
+                                        break
+                                    
+                                    # 画像パス（画像ファイル名の形式を確認）
+                                    # いくつかの形式を試してみる
+                                    img_paths = [
+                                        os.path.join(cam_path, "images", f"img_cam{cam}_{i:06d}.jpg"),
+                                        os.path.join(cam_path, "images", f"img_{i:06d}.jpg"),
+                                        os.path.join(cam_path, "images", f"frame_{i:06d}.jpg"),
+                                        os.path.join(cam_path, "images", f"frame{i:06d}.jpg")
+                                    ]
+                                    
+                                    img_path = None
+                                    for path in img_paths:
+                                        if os.path.exists(path):
+                                            img_path = path
+                                            break
+                                    
+                                    # 画像が見つからない場合はスキップ
+                                    if img_path is None:
+                                        if i == 0:  # 最初のフレームの場合のみメッセージを表示
+                                            print(f"画像が見つかりません: {img_paths[0]}")
+                                        continue
+                                    
+                                    # 2Dポーズ [17, 2]
+                                    pose_2d = pose_2d_data[i]
+                                    
+                                    # 3Dポーズ [17, 3]
+                                    pose_3d = f['poses_3d'][i] if 'poses_3d' in f else np.zeros((17, 3))
+                                    
+                                    # カメラパラメータ
+                                    # 注: カメラパラメータの構造はデータセットごとに異なる場合がある
+                                    if 'camera' in f:
+                                        if f['camera'].shape[1] >= 21:  # カメラパラメータが十分な次元を持っている場合
+                                            cam_param = {
+                                                'R': f['camera'][i, :9].reshape(3, 3),  # 回転行列
+                                                't': f['camera'][i, 9:12],               # 平行移動ベクトル
+                                                'K': f['camera'][i, 12:21].reshape(3, 3) # カメラ内部パラメータ
+                                            }
+                                        else:
+                                            # 不十分な次元の場合、デフォルト値で補完
+                                            cam_param = {
+                                                'R': np.eye(3),  # 単位行列
+                                                't': np.zeros(3),  # ゼロベクトル
+                                                'K': np.array([  # デフォルトの内部パラメータ
+                                                    [1000, 0, self.image_size[0]/2],
+                                                    [0, 1000, self.image_size[1]/2],
+                                                    [0, 0, 1]
+                                                ])
+                                            }
+                                    else:
+                                        # カメラパラメータが提供されていない場合のデフォルト値
+                                        cam_param = {
+                                            'R': np.eye(3),  # 単位行列
+                                            't': np.zeros(3),  # ゼロベクトル
+                                            'K': np.array([  # デフォルトの内部パラメータ
+                                                [1000, 0, self.image_size[0]/2],
+                                                [0, 1000, self.image_size[1]/2],
+                                                [0, 0, 1]
+                                            ])
+                                        }
+                                    
+                                    data.append({
+                                        'img_path': img_path,
+                                        'pose_2d': pose_2d,
+                                        'pose_3d': pose_3d,
+                                        'cam_param': cam_param,
+                                        'subject': subject,
+                                        'sequence': seq,
+                                        'camera': cam,
+                                        'frame': i
+                                    })
+                            else:
+                                print(f"'poses_2d'データセットが見つかりません: {annot_file}")
+                    except Exception as e:
+                        print(f"エラー: {annot_file}の読み込み中にエラーが発生しました: {e}")
+        
+        # データがない場合は警告
+        if len(data) == 0:
+            print("警告: データが読み込まれませんでした。ファイルパスとデータセット構造を確認してください。")
+        
         return data
     
     def __len__(self):
@@ -332,7 +415,8 @@ class MPIInf3DHPDataset(Dataset):
         try:
             img = cv2.imread(item['img_path'])
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        except:
+        except Exception as e:
+            print(f"画像の読み込みエラー: {item['img_path']}: {e}")
             # 画像が見つからない場合は黒画像を返す
             img = np.zeros((self.image_size[1], self.image_size[0], 3), dtype=np.uint8)
         
@@ -366,10 +450,13 @@ class MPIInf3DHPDataset(Dataset):
             'cam_R': cam_R,
             'cam_t': cam_t,
             'cam_K': cam_K,
+            'subject': item['subject'],
             'sequence': item['sequence'],
             'camera': item['camera'],
             'frame': item['frame']
         }
+    
+    # _augment_dataメソッドはそのまま
     
     def _augment_data(self, img, pose_2d, pose_3d):
         """
@@ -385,7 +472,6 @@ class MPIInf3DHPDataset(Dataset):
             pose_2d_aug: 拡張された2Dポーズ
             pose_3d_aug: 拡張された3Dポーズ
         """
-        # Human36MDatasetと同様のデータ拡張を行う
         # 水平方向の反転（50%の確率で）
         if random.random() > 0.5:
             img = cv2.flip(img, 1)  # 水平方向に反転
