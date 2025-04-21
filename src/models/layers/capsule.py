@@ -90,9 +90,13 @@ class CapsuleLayer(nn.Module):
         # 入力を拡張して各カプセルに適用
         x_expand = x.unsqueeze(1).expand(batch_size, self.num_capsules, self.in_features)  # [B, num_caps, in]
         
-        # 各カプセルの変換行列を適用
-        # [B, num_caps, in] @ [num_caps, in, out] -> [B, num_caps, out]
-        transformed = torch.bmm(x_expand, self.W)
+        # 変換行列をバッチサイズに拡張
+        W_expanded = self.W.unsqueeze(0).expand(batch_size, self.num_capsules, self.in_features, self.out_features)
+        
+        # バッチマトリックス乗算で変換
+        # [B, num_caps, in, 1] @ [B, num_caps, in, out] -> [B, num_caps, 1, out]
+        transformed = torch.matmul(x_expand.unsqueeze(-1).transpose(-1, -2), W_expanded)
+        transformed = transformed.squeeze(-2)  # [B, num_caps, out]
         
         # アテンション重みを適用
         # [B, num_caps, 1] * [B, num_caps, out] -> [B, num_caps, out]

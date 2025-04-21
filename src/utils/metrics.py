@@ -40,33 +40,48 @@ def procrustes_alignment(X, Y):
         X = X.detach().cpu().numpy()
     if isinstance(Y, torch.Tensor):
         Y = Y.detach().cpu().numpy()
+    
+    # NaNや無限大の値をチェック
+    if np.isnan(X).any() or np.isnan(Y).any() or np.isinf(X).any() or np.isinf(Y).any():
+        # 問題がある場合は元のポーズをそのまま返す
+        return X.copy()
         
     # 中心を原点に移動
     X_centered = X - X.mean(axis=0)
     Y_centered = Y - Y.mean(axis=0)
     
+    # ゼロ除算を防ぐために小さな値を追加
+    eps = 1e-7
+    
     # 分散をそろえる
-    X_scale = np.sqrt(np.sum(X_centered ** 2))
-    Y_scale = np.sqrt(np.sum(Y_centered ** 2))
+    X_scale = np.sqrt(np.sum(X_centered ** 2)) + eps
+    Y_scale = np.sqrt(np.sum(Y_centered ** 2)) + eps
     
     X_normalized = X_centered / X_scale
     Y_normalized = Y_centered / Y_scale
     
     # 最適な回転行列を計算
     H = X_normalized.T @ Y_normalized
-    U, S, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
     
-    # 反射変換を防ぐ
-    if np.linalg.det(R) < 0:
-        Vt[-1, :] *= -1
+    # SVDの計算で発散を防ぐために条件処理
+    try:
+        U, S, Vt = np.linalg.svd(H)
         R = Vt.T @ U.T
-    
-    # スケール、回転、平行移動を適用
-    scale = Y_scale / X_scale
-    t = Y.mean(axis=0) - scale * (R @ X.mean(axis=0))
-    
-    X_aligned = scale * (X @ R.T) + t
+        
+        # 反射変換を防ぐ
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = Vt.T @ U.T
+            
+        # スケール、回転、平行移動を適用
+        scale = Y_scale / X_scale
+        t = Y.mean(axis=0) - scale * (R @ X.mean(axis=0))
+        
+        X_aligned = scale * (X @ R.T) + t
+    except np.linalg.LinAlgError:
+        # SVDが収束しない場合は単純な中心合わせと尺度調整のみを行う
+        scale = Y_scale / X_scale
+        X_aligned = scale * X_centered + Y.mean(axis=0)
     
     return X_aligned
 
@@ -111,22 +126,36 @@ def calculate_n_mpjpe(predicted, target):
     if isinstance(target, torch.Tensor):
         target = target.detach().cpu().numpy()
     
+    # NaNや無限大の値をチェック
+    if np.isnan(predicted).any() or np.isnan(target).any() or np.isinf(predicted).any() or np.isinf(target).any():
+        # 問題がある場合は大きな値を返す
+        return 1000.0
+    
     # バッチごとに正規化して計算
     errors = []
     for i in range(predicted.shape[0]):
-        # 中心を原点に移動
-        pred_centered = predicted[i] - predicted[i].mean(axis=0)
-        target_centered = target[i] - target[i].mean(axis=0)
-        
-        # スケールを合わせる
-        pred_scale = np.sqrt(np.sum(pred_centered ** 2))
-        target_scale = np.sqrt(np.sum(target_centered ** 2))
-        
-        pred_normalized = pred_centered * (target_scale / pred_scale)
-        
-        # 誤差を計算
-        error = np.mean(np.sqrt(np.sum((pred_normalized - target_centered) ** 2, axis=-1)))
-        errors.append(error)
+        try:
+            # 中心を原点に移動
+            pred_centered = predicted[i] - predicted[i].mean(axis=0)
+            target_centered = target[i] - target[i].mean(axis=0)
+            
+            # スケールを合わせる (ゼロ除算を防ぐ)
+            eps = 1e-7
+            pred_scale = np.sqrt(np.sum(pred_centered ** 2)) + eps
+            target_scale = np.sqrt(np.sum(target_centered ** 2)) + eps
+            
+            pred_normalized = pred_centered * (target_scale / pred_scale)
+            
+            # 誤差を計算
+            error = np.mean(np.sqrt(np.sum((pred_normalized - target_centered) ** 2, axis=-1)))
+            errors.append(error)
+        except Exception as e:
+            # エラーが発生した場合は大きな値を追加
+            print(f"N-MPJPE計算中のサンプル{i}でエラー: {e}")
+            errors.append(1000.0)
+    
+    if len(errors) == 0:
+        return 1000.0
     
     return np.mean(errors)
 

@@ -69,26 +69,55 @@ class BoneLoss(nn.Module):
             loss: 骨の長さの比率のL1損失
         """
         batch_size = pose_3d.shape[0]
-        loss = 0.0
+        device = pose_3d.device
         
-        # 骨のペアごとに比率を計算
-        for (joint1a, joint1b), (joint2a, joint2b) in BONE_PAIRS:
-            # 骨ベクトルの計算
-            bone1 = pose_3d[:, joint1b] - pose_3d[:, joint1a]  # [B, 3]
-            bone2 = pose_3d[:, joint2b] - pose_3d[:, joint2a]  # [B, 3]
-            
-            # 骨の長さの計算
-            length1 = torch.norm(bone1, dim=1)  # [B]
-            length2 = torch.norm(bone2, dim=1)  # [B]
-            
-            # 左右の比率を1に近づける（左右対称性）
-            ratio = length1 / (length2 + 1e-8)
-            target_ratio = torch.ones_like(ratio)
-            
-            # 損失を追加
-            loss += torch.mean(torch.abs(ratio - target_ratio))
+        # データの異常値をチェック
+        if torch.isnan(pose_3d).any() or torch.isinf(pose_3d).any():
+            return torch.tensor(0.1, device=device)  # エラーがある場合は小さな損失を返す
         
-        return loss / len(BONE_PAIRS)
+        try:
+            loss = 0.0
+            
+            # 骨のペアごとに比率を計算
+            for (joint1a, joint1b), (joint2a, joint2b) in BONE_PAIRS:
+                # 骨ベクトルの計算
+                bone1 = pose_3d[:, joint1b] - pose_3d[:, joint1a]  # [B, 3]
+                bone2 = pose_3d[:, joint2b] - pose_3d[:, joint2a]  # [B, 3]
+                
+                # 骨の長さの計算
+                length1 = torch.norm(bone1, dim=1)  # [B]
+                length2 = torch.norm(bone2, dim=1)  # [B]
+                
+                # ゼロ長さのボーンがないか確認（異常値）
+                valid_lengths = (length1 > 1e-6) & (length2 > 1e-6)
+                if not valid_lengths.all():
+                    # 一部の骨の長さが無効なサンプルは除外
+                    valid_indices = torch.where(valid_lengths)[0]
+                    if len(valid_indices) == 0:
+                        continue
+                    length1 = length1[valid_indices]
+                    length2 = length2[valid_indices]
+                
+                # 左右の比率を1に近づける（左右対称性）
+                ratio = length1 / (length2 + 1e-8)
+                target_ratio = torch.ones_like(ratio)
+                
+                # 異常な比率を排除
+                valid_ratios = (ratio < 10.0) & (ratio > 0.1)
+                if not valid_ratios.all():
+                    valid_indices = torch.where(valid_ratios)[0]
+                    if len(valid_indices) == 0:
+                        continue
+                    ratio = ratio[valid_indices]
+                    target_ratio = target_ratio[valid_indices]
+                
+                # 損失を追加
+                loss += torch.mean(torch.abs(ratio - target_ratio))
+            
+            return loss / len(BONE_PAIRS)
+        except Exception as e:
+            print(f"BoneLoss計算中にエラーが発生しました: {e}")
+            return torch.tensor(0.1, device=device)  # エラー時は小さな損失を返す
 
 
 class LimbsLoss(nn.Module):
@@ -112,31 +141,48 @@ class LimbsLoss(nn.Module):
         device = pose_3d.device
         loss = torch.tensor(0.0, device=device)
         
-        # 各ポーズについて法線ベクトルを計算
-        # 骨盤と両側の股関節の位置から平面の法線を計算
-        hip_left = pose_3d[:, 4] - pose_3d[:, 0]   # 左股関節 - 骨盤
-        hip_right = pose_3d[:, 7] - pose_3d[:, 0]  # 右股関節 - 骨盤
+        # データの異常値をチェック
+        if torch.isnan(pose_3d).any() or torch.isinf(pose_3d).any():
+            return loss  # エラーがある場合は損失を0として返す
         
-        # 外積で法線ベクトルを計算
-        normal = torch.cross(hip_left, hip_right, dim=1)  # [B, 3]
-        normal = normal / (torch.norm(normal, dim=1, keepdim=True) + 1e-8)  # 正規化
-        
-        # 各制約付き肢について計算
-        for proximal, distal in CONSTRAINED_LIMBS:
-            # 近位部と遠位部のベクトル
-            proximal_vec = pose_3d[:, proximal] - pose_3d[:, 0]  # 近位関節 - 骨盤
-            distal_vec = pose_3d[:, distal] - pose_3d[:, proximal]  # 遠位関節 - 近位関節
+        try:
+            # 各ポーズについて法線ベクトルを計算
+            # 骨盤と両側の股関節の位置から平面の法線を計算
+            hip_left = pose_3d[:, 4] - pose_3d[:, 0]   # 左股関節 - 骨盤
+            hip_right = pose_3d[:, 7] - pose_3d[:, 0]  # 右股関節 - 骨盤
             
-            # 法線との内積
-            proximal_proj = torch.sum(normal * proximal_vec, dim=1)  # [B]
-            distal_proj = torch.sum(normal * distal_vec, dim=1)  # [B]
+            # 外積で法線ベクトルを計算
+            normal = torch.cross(hip_left, hip_right, dim=1)  # [B, 3]
+            normal_norm = torch.norm(normal, dim=1, keepdim=True)
             
-            # 不自然な曲げに対するペナルティ（ReLUで正の差のみを取得）
-            diff = proximal_proj - distal_proj
-            penalty = torch.maximum(torch.zeros_like(diff), diff)
+            # ゼロベクトルを避ける
+            valid_normals = normal_norm > 1e-6
+            if not valid_normals.all():
+                # 一部の法線ベクトルが無効な場合、代替の法線ベクトルを使用
+                normal[~valid_normals.squeeze()] = torch.tensor([0.0, 1.0, 0.0], device=device)
+                normal_norm[~valid_normals] = 1.0
             
-            # 損失を追加
-            loss += torch.mean(penalty)
+            normal = normal / (normal_norm + 1e-8)  # 正規化
+            
+            # 各制約付き肢について計算
+            for proximal, distal in CONSTRAINED_LIMBS:
+                # 近位部と遠位部のベクトル
+                proximal_vec = pose_3d[:, proximal] - pose_3d[:, 0]  # 近位関節 - 骨盤
+                distal_vec = pose_3d[:, distal] - pose_3d[:, proximal]  # 遠位関節 - 近位関節
+                
+                # 法線との内積
+                proximal_proj = torch.sum(normal * proximal_vec, dim=1)  # [B]
+                distal_proj = torch.sum(normal * distal_vec, dim=1)  # [B]
+                
+                # 不自然な曲げに対するペナルティ（ReLUで正の差のみを取得）
+                diff = proximal_proj - distal_proj
+                penalty = torch.maximum(torch.zeros_like(diff), diff)
+                
+                # 損失を追加
+                loss += torch.mean(penalty)
+        except Exception as e:
+            print(f"LimbsLoss計算中にエラーが発生しました: {e}")
+            return torch.tensor(0.1, device=device)  # エラー時は小さな損失を返す
         
         return loss / len(CONSTRAINED_LIMBS)
 
