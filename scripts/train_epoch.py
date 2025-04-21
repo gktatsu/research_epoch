@@ -388,6 +388,9 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
 
 
 def main():
+    # エラー検出を有効にする
+    torch.autograd.set_detect_anomaly(True)
+    
     parser = argparse.ArgumentParser(description='EPOCHフレームワークの訓練')
     parser.add_argument('--dataset', type=str, choices=['human36m', 'mpiinf3dhp'], default='mpiinf3dhp',
                         help='使用するデータセット')
