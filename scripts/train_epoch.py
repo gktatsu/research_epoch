@@ -409,7 +409,7 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
 
 def main():
     parser = argparse.ArgumentParser(description='EPOCHフレームワークの訓練')
-    parser.add_argument('--dataset', type=str, choices=['human36m', 'mpiinf3dhp'], default='human36m',
+    parser.add_argument('--dataset', type=str, choices=['human36m', 'mpiinf3dhp'], default='mpiinf3dhp',
                         help='使用するデータセット')
     parser.add_argument('--data_path', type=str, default=None,
                         help='使用するデータセットのパス')
