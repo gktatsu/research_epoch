@@ -139,6 +139,18 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
             if criterion['nf'] is not None:
                 loss_lift_nf = criterion['nf'](rotated_pose_2d_lift)
             
+            # 大きな損失値に対するクリッピング (テンソルのまま保持)
+            max_loss_value = torch.tensor(100.0, device=device)
+            loss_reg_rle = torch.minimum(loss_reg_rle, max_loss_value)
+            loss_reg_bone = torch.minimum(loss_reg_bone, max_loss_value)
+            loss_reg_limbs = torch.minimum(loss_reg_limbs, max_loss_value)
+            loss_lift_l2d = torch.minimum(loss_lift_l2d, max_loss_value)
+            loss_lift_l3d = torch.minimum(loss_lift_l3d, max_loss_value)
+            loss_lift_bone = torch.minimum(loss_lift_bone, max_loss_value)
+            loss_lift_limbs = torch.minimum(loss_lift_limbs, max_loss_value)
+            loss_lift_def = torch.minimum(loss_lift_def, max_loss_value)
+
+            
             # 重み付き損失の合計
             loss = (
                 loss_weights['rle'] * loss_reg_rle +
@@ -148,6 +160,7 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
                 loss_weights['l3d'] * loss_lift_l3d +
                 loss_weights['def'] * loss_lift_def
             )
+
             
             # Normalizing Flow損失（利用可能な場合）
             if criterion['nf'] is not None:
