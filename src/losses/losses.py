@@ -280,6 +280,7 @@ class ResidualLogLikelihoodLoss(nn.Module):
         residual = torch.norm(pred_2d - target_2d, dim=-1)  # [B, J]
         
         # 負の対数尤度
-        neg_log_likelihood = torch.log(sigma) + residual / sigma
+        epsilon = 1e-6  # 小さな定数
+        neg_log_likelihood = torch.log(sigma + epsilon) + residual / (sigma + epsilon)
         
         return torch.mean(neg_log_likelihood)
