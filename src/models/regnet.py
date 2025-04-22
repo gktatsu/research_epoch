@@ -35,6 +35,7 @@ class ContrastiveEncoder(nn.Module):
             self.out_features = 2048
         else:
             raise ValueError(f"未知のエンコーダアーキテクチャ: {encoder_name}")
+        
     
     def forward(self, x):
         """
