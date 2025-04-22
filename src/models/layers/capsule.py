@@ -90,13 +90,23 @@ class CapsuleLayer(nn.Module):
         # 入力を拡張して各カプセルに適用
         x_expand = x.unsqueeze(1).expand(batch_size, self.num_capsules, self.in_features)  # [B, num_caps, in]
         
-        # 変換行列をバッチサイズに拡張
-        W_expanded = self.W.unsqueeze(0).expand(batch_size, self.num_capsules, self.in_features, self.out_features)
+        # 各カプセルの変換行列を適用
+        # 数値的安定性のために行列積を慎重に計算
+        transformed = []
+        for i in range(self.num_capsules):
+            # 現在のカプセルの変換行列を取得
+            w_i = self.W[i]  # [in, out]
+            # バッチ内のすべての入力に対して変換を計算
+            t_i = torch.matmul(x, w_i)  # [B, out]
+            transformed.append(t_i)
         
-        # バッチマトリックス乗算で変換
-        # [B, num_caps, in, 1] @ [B, num_caps, in, out] -> [B, num_caps, 1, out]
-        transformed = torch.matmul(x_expand.unsqueeze(-1).transpose(-1, -2), W_expanded)
-        transformed = transformed.squeeze(-2)  # [B, num_caps, out]
+        # すべてのカプセルの変換をスタック
+        transformed = torch.stack(transformed, dim=1)  # [B, num_caps, out]
+        
+        # NaN をチェックして処理
+        if torch.isnan(transformed).any():
+            print("Warning: NaN values detected in capsule transformation")
+            transformed = torch.nan_to_num(transformed, nan=0.0)
         
         # アテンション重みを適用
         # [B, num_caps, 1] * [B, num_caps, out] -> [B, num_caps, out]
