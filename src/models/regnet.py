@@ -30,7 +30,12 @@ class ContrastiveEncoder(nn.Module):
         
         # ResNet50をベースにしたエンコーダを構築
         if encoder_name == 'resnet50':
-            base_model = models.resnet50(pretrained=pretrained)
+            if pretrained:
+                # pretrained=Trueの代わりにweights=ResNet50_Weights.DEFAULTを使用
+                from torchvision.models.resnet import ResNet50_Weights
+                base_model = models.resnet50(weights=ResNet50_Weights.DEFAULT)
+            else:
+                base_model = models.resnet50(weights=None)
             self.encoder = nn.Sequential(*list(base_model.children())[:-1])  # 最後の全結合層を除外
             self.out_features = 2048
         else:
