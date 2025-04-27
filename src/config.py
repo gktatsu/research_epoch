@@ -15,13 +15,10 @@ EXAMPLES_DIR = DATA_DIR / 'examples'
 
 # 出力ディレクトリ
 OUTPUT_DIR = ROOT_DIR / 'outputs'
-MODELS_DIR = OUTPUT_DIR / 'models'
-LOGS_DIR = OUTPUT_DIR / 'logs'
-VISUALIZATIONS_DIR = OUTPUT_DIR / 'visualizations'
 
 # 各ディレクトリが存在することを確認
 for dir_path in [DATA_DIR, HUMAN36M_DIR, MPI_INF_3DHP_DIR, EXAMPLES_DIR, 
-                OUTPUT_DIR, MODELS_DIR, LOGS_DIR, VISUALIZATIONS_DIR]:
+                OUTPUT_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
 # モデル設定
