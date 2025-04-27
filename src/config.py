@@ -14,13 +14,14 @@ MPI_INF_3DHP_DIR = DATA_DIR / 'MPI-INF-3DHP'
 EXAMPLES_DIR = DATA_DIR / 'examples'
 
 # 出力ディレクトリ
-OUTPUT_DIR = DATA_DIR / 'outputs'
+OUTPUT_DIR = ROOT_DIR / 'outputs'
 MODELS_DIR = OUTPUT_DIR / 'models'
+LOGS_DIR = OUTPUT_DIR / 'logs'
 VISUALIZATIONS_DIR = OUTPUT_DIR / 'visualizations'
 
 # 各ディレクトリが存在することを確認
 for dir_path in [DATA_DIR, HUMAN36M_DIR, MPI_INF_3DHP_DIR, EXAMPLES_DIR, 
-                 OUTPUT_DIR, MODELS_DIR, VISUALIZATIONS_DIR]:
+                OUTPUT_DIR, MODELS_DIR, LOGS_DIR, VISUALIZATIONS_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
 # モデル設定
@@ -115,8 +116,8 @@ DATASET_CONFIG = {
         'image_size': (224, 224),
     },
     'mpi_inf_3dhp': {
-        'train_sequences': [1],
-        'test_sequences': [2, 3, 4, 5, 6, 7, 8],
+        'train_sequences': [1, 2, 3, 4, 5, 6, 7],
+        'test_sequences': [8],
         'image_size': (224, 224),
     }
 }
