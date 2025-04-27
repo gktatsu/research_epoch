@@ -54,6 +54,6 @@ data/outputs/logs/
 *.swo
 
 # Visualizations
-data/outputs/visualizations/
-data/outputs/models/logs/
+data/
 share_memo.txt
+outputs/
