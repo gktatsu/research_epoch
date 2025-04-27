@@ -205,6 +205,9 @@ class DeformationLoss(nn.Module):
         
         loss = 0.0
         
+        # 数値の安定性のためにクリッピングする値
+        eps = 1e-6
+        
         # バッチ内の全てのペアについて
         for i in range(batch_size):
             for j in range(i+1, batch_size):
@@ -214,15 +217,23 @@ class DeformationLoss(nn.Module):
                 # 再構築されたポーズの差
                 recon_diff = reconstructed_3d[i] - reconstructed_3d[j]  # [J, 3]
                 
-                # 変形の差のL2ノルム
-                deform_diff = torch.norm(orig_diff - recon_diff, dim=-1)  # [J]
+                # 変形の差のL2ノルム（数値の安定性のためにclampを使用）
+                diff = orig_diff - recon_diff
+                # 非常に大きな値や小さな値をクリップして安定化
+                diff = torch.clamp(diff, min=-1e6, max=1e6)
+                
+                # L2ノルムを計算（eps追加で0除算を防止）
+                deform_diff = torch.sqrt(torch.sum(diff * diff, dim=-1) + eps)  # [J]
                 
                 # 損失を追加
                 loss += torch.mean(deform_diff)
         
         # ペアの数で正規化
         num_pairs = (batch_size * (batch_size - 1)) // 2
-        return loss / num_pairs
+        if num_pairs > 0:  # 追加のチェック
+            return loss / num_pairs
+        else:
+            return torch.tensor(0.0, device=pred_3d.device)
 
 
 class NFLoss(nn.Module):
