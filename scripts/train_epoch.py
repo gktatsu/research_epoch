@@ -26,7 +26,7 @@ from tqdm import tqdm
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import MODELS_DIR, DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG
+from src.config import MODELS_DIR, DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, OUTPUT_DIR
 from src.models import EPOCH, NormalizingFlow
 from src.data import get_dataloader
 from src.losses import L2DLoss, L3DLoss, BoneLoss, LimbsLoss, DeformationLoss, NFLoss, ResidualLogLikelihoodLoss
@@ -464,7 +464,7 @@ def main():
                         help='データローダーのワーカー数')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='使用するデバイス')
-    parser.add_argument('--output_dir', type=str, default=MODELS_DIR,
+    parser.add_argument('--output_dir', type=str, default=OUTPUT_DIR,
                         help='モデル保存ディレクトリ')
     parser.add_argument('--regnet_path', type=str, default=None,
                         help='事前学習済みのRegNetモデルのパス')
@@ -481,8 +481,22 @@ def main():
     
     args = parser.parse_args()
     
-    # 出力ディレクトリを作成
-    os.makedirs(args.output_dir, exist_ok=True)
+    # 実行日時に基づいたユニークなディレクトリ名を生成
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(OUTPUT_DIR, f'run_{timestamp}')
+    
+    # サブディレクトリを作成
+    models_dir = os.path.join(run_dir, 'models')
+    logs_dir = os.path.join(run_dir, 'logs')
+    vis_dir = os.path.join(run_dir, 'visualizations')
+    
+    # ディレクトリを作成
+    for dir_path in [run_dir, models_dir, logs_dir, vis_dir]:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # 出力先をカスタムディレクトリに変更
+    if args.output_dir is None:
+        args.output_dir = models_dir
     
     # デバイスを設定
     device = torch.device(args.device)
@@ -597,7 +611,7 @@ def main():
     
     # TensorBoardのSummaryWriter
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = os.path.join(args.output_dir, 'logs', f'epoch_{args.dataset}_{timestamp}')
+    log_dir = os.path.join(OUTPUT_DIR, 'logs', f'epoch_{args.dataset}_{timestamp}')
     writer = SummaryWriter(log_dir=log_dir)
     
     # 開始エポックと最良の損失を初期化
@@ -663,7 +677,7 @@ def main():
         # 最良のモデルを保存
         if val_losses['total'] < best_val_loss:
             best_val_loss = val_losses['total']
-            best_model_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_best.pth")
+            best_model_path = os.path.join(models_dir, f"epoch_{args.dataset}_best.pth")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -678,7 +692,7 @@ def main():
         
         # 定期的にチェックポイントを保存
         if (epoch + 1) % 5 == 0 or epoch == args.epochs - 1:
-            checkpoint_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_epoch_{epoch+1}.pth")
+            checkpoint_path = os.path.join(models_dir, f"epoch_{args.dataset}_epoch_{epoch+1}.pth")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -692,7 +706,7 @@ def main():
             print(f"チェックポイントを保存しました: {checkpoint_path}")
     
     # 最終モデルを保存
-    final_model_path = os.path.join(args.output_dir, f"epoch_{args.dataset}_final.pth")
+    final_model_path = os.path.join(models_dir, f"epoch_{args.dataset}_final.pth")
     torch.save({
         'epoch': args.epochs - 1,
         'model_state_dict': model.state_dict(),

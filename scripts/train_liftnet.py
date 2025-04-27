@@ -17,7 +17,7 @@ from tqdm import tqdm
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import MODELS_DIR, DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG
+from src.config import MODELS_DIR, DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, OUTPUT_DIR
 from src.models import LiftNet, NormalizingFlow
 from src.data import get_dataloader
 from src.losses import L2DLoss, L3DLoss, BoneLoss, LimbsLoss, DeformationLoss, NFLoss
@@ -299,7 +299,7 @@ def main():
                         help='データローダーのワーカー数')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='使用するデバイス')
-    parser.add_argument('--output_dir', type=str, default=MODELS_DIR,
+    parser.add_argument('--output_dir', type=str, default=OUTPUT_DIR,
                         help='モデル保存ディレクトリ')
     parser.add_argument('--nf_epochs', type=int, default=50,
                         help='Normalizing Flowの訓練エポック数')
@@ -308,8 +308,22 @@ def main():
     
     args = parser.parse_args()
     
-    # 出力ディレクトリを作成
-    os.makedirs(args.output_dir, exist_ok=True)
+    # 実行日時に基づいたユニークなディレクトリ名を生成
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(OUTPUT_DIR, f'run_{timestamp}')
+    
+    # サブディレクトリを作成
+    models_dir = os.path.join(run_dir, 'models')
+    logs_dir = os.path.join(run_dir, 'logs')
+    vis_dir = os.path.join(run_dir, 'visualizations')
+    
+    # ディレクトリを作成
+    for dir_path in [run_dir, models_dir, logs_dir, vis_dir]:
+        os.makedirs(dir_path, exist_ok=True)
+    
+    # 出力先をカスタムディレクトリに変更
+    if args.output_dir is None:
+        args.output_dir = OUTPUT_DIR
     
     # デバイスを設定
     device = torch.device(args.device)
@@ -400,8 +414,7 @@ def main():
     )
     
     # TensorBoardのSummaryWriter
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = os.path.join(args.output_dir, 'logs', f'liftnet_{args.dataset}_{timestamp}')
+    log_dir = os.path.join(OUTPUT_DIR, f'liftnet_{args.dataset}')
     writer = SummaryWriter(log_dir=log_dir)
     
     # 開始エポックと最良の損失を初期化
