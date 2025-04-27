@@ -10,6 +10,7 @@ conda activate epoch
 cd scripts
 python train_epoch.py --dataset mpiinf3dhp --data_path /home2/t-hori/2025/develop/epoch/data/MPI-INF-3DHP/mpi_inf_3dhp_training_set_h5
 """
+
 import os
 import sys
 import argparse
@@ -26,11 +27,11 @@ from tqdm import tqdm
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import MODELS_DIR, DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, OUTPUT_DIR
+from src.config import DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, OUTPUT_DIR
 from src.models import EPOCH, NormalizingFlow
 from src.data import get_dataloader
 from src.losses import L2DLoss, L3DLoss, BoneLoss, LimbsLoss, DeformationLoss, NFLoss, ResidualLogLikelihoodLoss
-from src.utils.metrics import calculate_mpjpe, calculate_pa_mpjpe, calculate_n_mpjpe
+from src.utils import calculate_mpjpe, calculate_pa_mpjpe, calculate_n_mpjpe, save_checkpoint, save_metrics_to_csv, plot_metrics, plot_losses, save_pose_visualizations
 
 
 def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, device, loss_weights):
@@ -153,15 +154,7 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
             
             # 大きな損失値に対するクリッピング (テンソルのまま保持)
             max_loss_value = torch.tensor(100.0, device=device)
-            # loss_reg_rle = torch.minimum(loss_reg_rle, max_loss_value)
-            # loss_reg_bone = torch.minimum(loss_reg_bone, max_loss_value)
-            # loss_reg_limbs = torch.minimum(loss_reg_limbs, max_loss_value)
-            # loss_lift_l2d = torch.minimum(loss_lift_l2d, max_loss_value)
-            # loss_lift_l3d = torch.minimum(loss_lift_l3d, max_loss_value)
-            # loss_lift_bone = torch.minimum(loss_lift_bone, max_loss_value)
-            # loss_lift_limbs = torch.minimum(loss_lift_limbs, max_loss_value)
-            # loss_lift_def = torch.minimum(loss_lift_def, max_loss_value)
-
+            
             # 各損失が確実にテンソルであることを確認
             loss_reg_rle = torch.minimum(loss_reg_rle if isinstance(loss_reg_rle, torch.Tensor) 
                                         else torch.tensor(loss_reg_rle, device=device), max_loss_value)
@@ -245,7 +238,7 @@ def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, dev
     return total_losses, total_metrics
 
 
-def validate(model, normalizing_flow, val_loader, criterion, device, loss_weights):
+def validate(model, normalizing_flow, val_loader, criterion, device, loss_weights, visualize_dir=None, epoch=None):
     """
     検証を実行
     
@@ -256,6 +249,8 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
         criterion: 損失関数の辞書
         device: デバイス
         loss_weights: 損失関数の重み
+        visualize_dir: 可視化結果の保存ディレクトリ
+        epoch: 現在のエポック
         
     Returns:
         losses: 各損失の平均値
@@ -286,6 +281,9 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
     # バッチ数
     num_batches = len(val_loader)
     
+    # 可視化する画像のインデックス
+    visualize_indices = [0, 1] if visualize_dir is not None else []
+    
     # 勾配計算を無効化
     with torch.no_grad():
         # 進捗バー
@@ -306,10 +304,15 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                 
                 # RegNetの出力
                 regnet_outputs = outputs['regnet_outputs']
-                pose_2d_reg = regnet_outputs['pose_2d']         # RegNetで推定された2Dポーズ
+                pose_2d_pred = regnet_outputs['pose_2d']         # RegNetで推定された2Dポーズ
                 pose_3d_reg = regnet_outputs['pose_3d']         # RegNetで推定された3Dポーズ
                 joint_presence = regnet_outputs['joint_presence'] # 関節存在確率
-                rotated_pose_2d_reg = regnet_outputs.get('pose_2d_rotated', None)  # 回転された2Dポーズ（RegNet）
+                
+                # 回転されたポーズと2D投影
+                if 'pose_2d_rotated' in regnet_outputs:
+                    rotated_pose_2d_reg = regnet_outputs['pose_2d_rotated']
+                else:
+                    rotated_pose_2d_reg = None
                 
                 # LiftNetの出力
                 liftnet_outputs = outputs['liftnet_outputs']
@@ -322,7 +325,7 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                 joint_presence = torch.sigmoid(joint_presence)
                 
                 # RegNetの損失を計算
-                loss_reg_rle = criterion['rle'](pose_2d_reg, pose_2d_gt, joint_presence)
+                loss_reg_rle = criterion['rle'](pose_2d_pred, pose_2d_gt, joint_presence)
                 loss_reg_bone = criterion['bone'](pose_3d_reg)
                 loss_reg_limbs = criterion['limbs'](pose_3d_reg)
                 
@@ -352,16 +355,8 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                     
                 # 大きな損失値に対するクリッピング (テンソルのまま保持)
                 max_loss_value = torch.tensor(100.0, device=device)
-                # loss_reg_rle = torch.minimum(loss_reg_rle, max_loss_value)
-                # loss_reg_bone = torch.minimum(loss_reg_bone, max_loss_value)
-                # loss_reg_limbs = torch.minimum(loss_reg_limbs, max_loss_value)
-                # loss_lift_l2d = torch.minimum(loss_lift_l2d, max_loss_value)
-                # loss_lift_l3d = torch.minimum(loss_lift_l3d, max_loss_value)
-                # loss_lift_bone = torch.minimum(loss_lift_bone, max_loss_value)
-                # loss_lift_limbs = torch.minimum(loss_lift_limbs, max_loss_value)
-                # loss_lift_def = torch.minimum(loss_lift_def, max_loss_value)
                 
-                 # 各損失が確実にテンソルであることを確認
+                # 各損失が確実にテンソルであることを確認
                 loss_reg_rle = torch.minimum(loss_reg_rle if isinstance(loss_reg_rle, torch.Tensor) 
                                             else torch.tensor(loss_reg_rle, device=device), max_loss_value)
                 loss_reg_bone = torch.minimum(loss_reg_bone if isinstance(loss_reg_bone, torch.Tensor) 
@@ -396,7 +391,6 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                 if rotated_pose_2d_lift is not None and criterion['nf'] is not None:
                     loss += loss_weights['nf'] * loss_nf_lift
                     
-                
                 # 損失を累積
                 total_losses['total'] += loss.item()
                 total_losses['rle'] += loss_reg_rle.item()
@@ -406,14 +400,15 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                 total_losses['l3d'] += loss_lift_l3d.item()
                 total_losses['def'] += loss_lift_def.item()
                 
-                if rotated_pose_2d_reg is not None and criterion['nf'] is not None:
-                    total_losses['nf_reg'] += loss_nf_reg.item() / 2
-                if rotated_pose_2d_lift is not None and criterion['nf'] is not None:
-                    total_losses['nf_lift'] += loss_nf_lift.item() / 2
+                if criterion['nf'] is not None:
+                    if rotated_pose_2d_reg is not None:
+                        total_losses['nf'] += loss_nf_reg.item() / 2
+                    if rotated_pose_2d_lift is not None:
+                        total_losses['nf'] += loss_nf_lift.item() / 2
 
                 # 評価指標を計算
                 # 2Dポーズの平均関節位置誤差（ピクセル単位）
-                mpjpe_2d = torch.mean(torch.sqrt(torch.sum((pose_2d_reg - pose_2d_gt) ** 2, dim=-1)))
+                mpjpe_2d = torch.mean(torch.sqrt(torch.sum((pose_2d_pred - pose_2d_gt) ** 2, dim=-1)))
                 
                 # 3Dポーズの平均関節位置誤差（mm単位）
                 # CPUに転送して計算（NumPy関数を使用するため）
@@ -429,6 +424,29 @@ def validate(model, normalizing_flow, val_loader, criterion, device, loss_weight
                 total_metrics['mpjpe_3d'] += mpjpe_3d
                 total_metrics['pa_mpjpe_3d'] += pa_mpjpe_3d
                 total_metrics['n_mpjpe_3d'] += n_mpjpe_3d
+                
+                # 可視化
+                if batch_idx == 0 and visualize_dir is not None and epoch is not None:
+                    for i in visualize_indices:
+                        if i < batch_size:
+                            # 画像を[0, 255]スケールに変換
+                            img_np = image[i].permute(1, 2, 0).detach().cpu().numpy() * 255
+                            img_np = img_np.astype(np.uint8)
+                            
+                            # ポーズをCPUに転送
+                            pose_2d_np = pose_2d_pred[i].detach().cpu().numpy()
+                            pose_3d_np = pose_3d_lift[i].detach().cpu().numpy()
+                            
+                            # 可視化して保存
+                            save_pose_visualizations(
+                                img_np,
+                                pose_2d_np,
+                                pose_3d_np,
+                                visualize_dir,
+                                'val',
+                                epoch,
+                                i
+                            )
                 
                 # 進捗バーに現在の損失を表示
                 t.set_postfix(loss=loss.item())
@@ -478,25 +496,24 @@ def main():
                         help='RegNetの重みを凍結するかどうか')
     parser.add_argument('--freeze_liftnet', action='store_true',
                         help='LiftNetの重みを凍結するかどうか')
+    parser.add_argument('--save_freq', type=int, default=5,
+                        help='チェックポイントを保存する頻度（エポック数）')
     
     args = parser.parse_args()
     
     # 実行日時に基づいたユニークなディレクトリ名を生成
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(OUTPUT_DIR, f'run_{timestamp}')
+    run_dir = os.path.join(args.output_dir, f'run_{timestamp}')
     
     # サブディレクトリを作成
     models_dir = os.path.join(run_dir, 'models')
     logs_dir = os.path.join(run_dir, 'logs')
     vis_dir = os.path.join(run_dir, 'visualizations')
+    result_dir = os.path.join(run_dir, 'results')
     
     # ディレクトリを作成
-    for dir_path in [run_dir, models_dir, logs_dir, vis_dir]:
+    for dir_path in [run_dir, models_dir, logs_dir, vis_dir, result_dir]:
         os.makedirs(dir_path, exist_ok=True)
-    
-    # 出力先をカスタムディレクトリに変更
-    if args.output_dir is None:
-        args.output_dir = models_dir
     
     # デバイスを設定
     device = torch.device(args.device)
@@ -610,9 +627,13 @@ def main():
     )
     
     # TensorBoardのSummaryWriter
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = os.path.join(OUTPUT_DIR, 'logs', f'epoch_{args.dataset}_{timestamp}')
-    writer = SummaryWriter(log_dir=log_dir)
+    writer = SummaryWriter(log_dir=logs_dir)
+    
+    # 訓練・検証の履歴
+    train_losses_history = []
+    val_losses_history = []
+    train_metrics_history = []
+    val_metrics_history = []
     
     # 開始エポックと最良の損失を初期化
     start_epoch = 0
@@ -627,6 +648,17 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_val_loss = checkpoint['best_val_loss']
+            
+            # 履歴を読み込み
+            if 'train_losses' in checkpoint:
+                train_losses_history = checkpoint['train_losses']
+            if 'val_losses' in checkpoint:
+                val_losses_history = checkpoint['val_losses']
+            if 'train_metrics' in checkpoint:
+                train_metrics_history = checkpoint['train_metrics']
+            if 'val_metrics' in checkpoint:
+                val_metrics_history = checkpoint['val_metrics']
+                
             print(f"エポック {start_epoch} から訓練を再開します")
         else:
             print(f"チェックポイントが見つかりません: {args.resume}")
@@ -644,7 +676,13 @@ def main():
         train_losses, train_metrics = train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, device, loss_weights)
         
         # 検証
-        val_losses, val_metrics = validate(model, normalizing_flow, val_loader, criterion, device, loss_weights)
+        val_losses, val_metrics = validate(model, normalizing_flow, val_loader, criterion, device, loss_weights, vis_dir, epoch+1)
+        
+        # 履歴に追加
+        train_losses_history.append(train_losses)
+        val_losses_history.append(val_losses)
+        train_metrics_history.append(train_metrics)
+        val_metrics_history.append(val_metrics)
         
         # 経過時間を計算
         epoch_time = time.time() - start_time
@@ -674,46 +712,100 @@ def main():
         print(f"訓練 MPJPE 3D: {train_metrics['mpjpe_3d']:.2f} mm, PA-MPJPE 3D: {train_metrics['pa_mpjpe_3d']:.2f} mm")
         print(f"検証 MPJPE 3D: {val_metrics['mpjpe_3d']:.2f} mm, PA-MPJPE 3D: {val_metrics['pa_mpjpe_3d']:.2f} mm")
         
+        # CSVファイルとプロットを保存
+        save_metrics_to_csv(
+            train_metrics_history,
+            val_metrics_history,
+            train_losses_history,
+            val_losses_history,
+            result_dir,
+            'epoch_metrics'
+        )
+        
+        plot_metrics(train_metrics_history, val_metrics_history, result_dir)
+        plot_losses(train_losses_history, val_losses_history, result_dir)
+        
         # 最良のモデルを保存
         if val_losses['total'] < best_val_loss:
             best_val_loss = val_losses['total']
             best_model_path = os.path.join(models_dir, f"epoch_{args.dataset}_best.pth")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'best_val_loss': best_val_loss,
-                'train_losses': train_losses,
-                'val_losses': val_losses,
-                'train_metrics': train_metrics,
-                'val_metrics': val_metrics
-            }, best_model_path)
+            
+            # チェックポイントを保存
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                best_val_loss,
+                {
+                    'train': train_metrics,
+                    'val': val_metrics
+                },
+                {
+                    'train': train_losses,
+                    'val': val_losses
+                },
+                best_model_path
+            )
+            
             print(f"最良のモデルを保存しました: {best_model_path}")
         
         # 定期的にチェックポイントを保存
-        if (epoch + 1) % 5 == 0 or epoch == args.epochs - 1:
+        if (epoch + 1) % args.save_freq == 0 or epoch == args.epochs - 1:
             checkpoint_path = os.path.join(models_dir, f"epoch_{args.dataset}_epoch_{epoch+1}.pth")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'best_val_loss': best_val_loss,
-                'train_losses': train_losses,
-                'val_losses': val_losses,
-                'train_metrics': train_metrics,
-                'val_metrics': val_metrics
-            }, checkpoint_path)
+            
+            # チェックポイントを保存
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                best_val_loss,
+                {
+                    'train': train_metrics,
+                    'val': val_metrics
+                },
+                {
+                    'train': train_losses,
+                    'val': val_losses
+                },
+                checkpoint_path
+            )
+            
             print(f"チェックポイントを保存しました: {checkpoint_path}")
     
     # 最終モデルを保存
     final_model_path = os.path.join(models_dir, f"epoch_{args.dataset}_final.pth")
-    torch.save({
-        'epoch': args.epochs - 1,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'best_val_loss': best_val_loss
-    }, final_model_path)
+    
+    # チェックポイントを保存
+    save_checkpoint(
+        model,
+        optimizer,
+        args.epochs - 1,
+        best_val_loss,
+        {
+            'train': train_metrics_history[-1],
+            'val': val_metrics_history[-1]
+        },
+        {
+            'train': train_losses_history[-1],
+            'val': val_losses_history[-1]
+        },
+        final_model_path
+    )
+    
     print(f"最終モデルを保存しました: {final_model_path}")
+    
+    # メトリクスとプロットを最終的に保存
+    save_metrics_to_csv(
+        train_metrics_history,
+        val_metrics_history,
+        train_losses_history,
+        val_losses_history,
+        result_dir,
+        'epoch_metrics_final'
+    )
+    
+    plot_metrics(train_metrics_history, val_metrics_history, result_dir, 'final_metric')
+    plot_losses(train_losses_history, val_losses_history, result_dir, 'final_loss')
     
     # TensorBoardのSummaryWriterを閉じる
     writer.close()
