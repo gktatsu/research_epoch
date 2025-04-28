@@ -818,7 +818,7 @@ if __name__ == '__main__':
         send_msg("train_epoch start")
         main()
         send_msg("train_epoch end")
-    except:
-        print("エラーが発生しました。トレーニングを中止します。")
-        send_msg("エラーが発生しました。トレーニングを中止します。")
+    except Exception as e:
+        print("エラーが発生しました。トレーニングを中止します：", e)
+        send_msg("エラーが発生しました。トレーニングを中止します：", e)
         raise
