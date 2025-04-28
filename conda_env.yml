@@ -17,4 +17,5 @@ dependencies:
   - pip
   - tensorboard>=1.15
   - scikit-learn
-  - opencv  # pip から conda に変更
+  - opencv
+  - python-dotenv
