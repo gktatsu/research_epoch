@@ -116,11 +116,18 @@ class CameraModel(nn.Module):
             
             # 同次座標から2D座標へ
             points_image = points_image.transpose(0, 1)  # [P, 3]
-            points_2d_i = points_image[:, :2] / points_image[:, 2:3]  # [P, 2]
+            
+            # エラー回避のために、Z値に小さな値を加えてゼロ除算を防止
+            z_values = points_image[:, 2:3].clone()
+            z_values = torch.where(torch.abs(z_values) < 1e-6, torch.ones_like(z_values) * 1e-6, z_values)
+            points_2d_i = points_image[:, :2] / z_values  # [P, 2]
             
             points_2d_homogeneous.append(points_2d_i)
         
         points_2d = torch.stack(points_2d_homogeneous)
+        
+        # 無限大やNaNをフィルタリング
+        points_2d = torch.nan_to_num(points_2d, nan=0.0, posinf=1e4, neginf=-1e4)
         
         return points_2d
     
