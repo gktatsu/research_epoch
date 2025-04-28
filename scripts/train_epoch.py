@@ -668,6 +668,7 @@ def main():
     
     for epoch in range(start_epoch, args.epochs):
         print(f"エポック {epoch+1}/{args.epochs}")
+        send_msg(f"エポック {epoch+1}/{args.epochs}")
         
         # 時間を計測
         start_time = time.time()
