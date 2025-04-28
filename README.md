@@ -24,6 +24,8 @@ EPOCHフレームワークは、単一の2D画像から3Dカメラパラメー�
 conda env create -f conda_env.yml
 # 環境を有効化
 conda activate epoch
+# 環境を出力
+conda env export -n epoch > conda_lock.yaml
 ```
 
 ## 使用方法
