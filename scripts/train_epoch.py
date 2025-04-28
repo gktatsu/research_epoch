@@ -31,7 +31,7 @@ from src.config import DATASET_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, OUTPUT_DIR
 from src.models import EPOCH, NormalizingFlow
 from src.data import get_dataloader
 from src.losses import L2DLoss, L3DLoss, BoneLoss, LimbsLoss, DeformationLoss, NFLoss, ResidualLogLikelihoodLoss
-from src.utils import calculate_mpjpe, calculate_pa_mpjpe, calculate_n_mpjpe, save_checkpoint, save_metrics_to_csv, plot_metrics, plot_losses, save_pose_visualizations
+from src.utils import calculate_mpjpe, calculate_pa_mpjpe, calculate_n_mpjpe, save_checkpoint, save_metrics_to_csv, plot_metrics, plot_losses, save_pose_visualizations, send_msg
 
 
 def train_epoch(model, normalizing_flow, train_loader, optimizer, criterion, device, loss_weights):
@@ -814,4 +814,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        send_msg("train_epoch start")
+        main()
+        send_msg("train_epoch end")
+    except:
+        print("エラーが発生しました。トレーニングを中止します。")
+        send_msg("エラーが発生しました。トレーニングを中止します。")
+        raise
